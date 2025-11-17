@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Renombrador de Comprobantes Electrónicos</title>
+    <link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+    <header class="header">
+        <h1>Renombrador de Comprobantes Electrónicos</h1>
+        <p class="subtitulo">Renombra archivos ZIP usando el NumeroConsecutivo del XML interno</p>
+    </header>
+
+    <main class="contenido-principal">
+        <!-- Zona de carga de archivos -->
+        <section class="seccion-carga">
+            <div class="zona-drop" id="zonaDrop">
+                <div class="icono-upload">📁</div>
+                <p class="texto-principal">Arrastra y suelta archivos ZIP aquí</p>
+                <p class="texto-secundario">o</p>
+                <button class="boton boton-primario" onclick="document.getElementById('inputArchivos').click()">
+                    Seleccionar Archivos
+                </button>
+                <input type="file" id="inputArchivos" multiple accept=".zip" style="display: none;" onchange="manejarArchivosSeleccionados(event)">
+            </div>
+        </section>
+
+        <!-- Resumen de archivos cargados -->
+        <section class="seccion-resumen" id="seccionResumen" style="display: none;">
+            <h2>Archivos Cargados</h2>
+            <div class="resumen-stats">
+                <div class="stat">
+                    <span class="stat-numero" id="totalArchivos">0</span>
+                    <span class="stat-label">Total</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-numero" id="archivosUnicos">0</span>
+                    <span class="stat-label">Únicos</span>
+                </div>
+                <div class="stat stat-warning">
+                    <span class="stat-numero" id="archivosDuplicados">0</span>
+                    <span class="stat-label">Duplicados</span>
+                </div>
+                <div class="stat stat-error">
+                    <span class="stat-numero" id="archivosError">0</span>
+                    <span class="stat-label">Errores</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Tabla de archivos -->
+        <section class="seccion-tabla" id="seccionTabla" style="display: none;">
+            <h2>Detalle de Archivos</h2>
+            <div class="tabla-contenedor">
+                <table class="tabla" id="tablaArchivos">
+                    <thead>
+                        <tr>
+                            <th>Archivo Original</th>
+                            <th>NumeroConsecutivo</th>
+                            <th>Nuevo Nombre</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tablaBody">
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Acciones -->
+        <section class="seccion-acciones" id="seccionAcciones" style="display: none;">
+            <button class="boton boton-primario" onclick="procesarYDescargar()">
+                📦 Descargar Archivos Procesados (ZIP)
+            </button>
+            <button class="boton boton-secundario" onclick="exportarReporteJSON()">
+                📄 Exportar Reporte JSON
+            </button>
+            <button class="boton boton-secundario" onclick="exportarReporteCSV()">
+                📊 Exportar Reporte CSV
+            </button>
+            <button class="boton boton-peligro" onclick="limpiarTodo()">
+                🗑️ Limpiar Todo
+            </button>
+        </section>
+
+        <!-- Log de operaciones -->
+        <section class="seccion-log" id="seccionLog" style="display: none;">
+            <h2>Log de Operaciones</h2>
+            <div class="log-contenedor" id="logContenedor">
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <div class="footer-contenido">
+            <p><strong>Autor:</strong> Andry Sanabria Mata</p>
+            <p><strong>Especialidad:</strong> ITSM (IT Service Management)</p>
+            <p><strong>Asistente de Desarrollo:</strong> Claude AI (Anthropic)</p>
+            <p>© Todos los derechos reservados | Uso no autorizado prohibido</p>
+            <p class="footer-id">ID: <span id="versionId">APP-2025-11-RCE001</span></p>
+        </div>
+    </footer>
+
+    <script src="jszip.min.js"></script>
+    <script src="scripts.js"></script>
+</body>
+</html>
