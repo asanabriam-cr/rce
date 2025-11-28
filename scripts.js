@@ -1,365 +1,620 @@
 // Configuración
 const CONFIG = {
-    id: 'APP-2025-11-RCE001',
+    id: 'APP-2025-11-OAF001',
     version: '1.0.0',
-    fecha: '2025-11-14',
+    fecha: '2025-11-27',
     autor: 'Andry Sanabria Mata',
     fechaExpiracion: null
 };
 
 // Estado de la aplicación
-let archivosOriginales = []; // Archivos ZIP originales
-let archivosProcesados = []; // Información procesada de cada archivo
-let logEntradas = [];
+let archivosSeleccionados = [];
+let archivosRenombrados = [];
+let estaProcesando = false;
 
-// Inicialización
+// ==================== INICIALIZACIÓN ====================
 document.addEventListener('DOMContentLoaded', inicializar);
 
 function inicializar() {
-    console.log(`Iniciando ${CONFIG.id} v${CONFIG.version}`);
-    document.getElementById('versionId').textContent = CONFIG.id;
-    configurarDragDrop();
-    agregarLog('Aplicación iniciada correctamente', 'info');
-}
-
-// Configurar Drag & Drop
-function configurarDragDrop() {
-    const zonaDrop = document.getElementById('zonaDrop');
+    log('🚀 Aplicación iniciada', 'header');
+    log(`📋 ID: ${CONFIG.id} | Versión: ${CONFIG.version}`, 'info');
     
-    zonaDrop.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        zonaDrop.classList.add('drag-over');
+    // Configurar event listeners
+    document.getElementById('btnSelectFiles').addEventListener('click', () => {
+        document.getElementById('fileInput').click();
     });
     
-    zonaDrop.addEventListener('dragleave', () => {
-        zonaDrop.classList.remove('drag-over');
-    });
+    document.getElementById('fileInput').addEventListener('change', manejarSeleccionArchivos);
+    document.getElementById('btnPreview').addEventListener('click', mostrarVistaPrevia);
+    document.getElementById('btnProcess').addEventListener('click', procesarArchivos);
+    document.getElementById('btnDownloadAll').addEventListener('click', descargarTodos);
+    document.getElementById('btnClearLog').addEventListener('click', limpiarLog);
     
-    zonaDrop.addEventListener('drop', (e) => {
-        e.preventDefault();
-        zonaDrop.classList.remove('drag-over');
-        const archivos = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.zip'));
-        if (archivos.length > 0) {
-            procesarArchivosSubidos(archivos);
-        } else {
-            agregarLog('No se encontraron archivos ZIP válidos', 'warning');
-        }
-    });
+    // Botones de exportación
+    document.getElementById('btnExportJSON').addEventListener('click', () => exportarJSON(archivosRenombrados));
+    document.getElementById('btnExportCSV').addEventListener('click', () => exportarCSV(archivosRenombrados));
+    document.getElementById('btnExportHTML').addEventListener('click', () => exportarHTML(archivosRenombrados));
+    document.getElementById('btnExportXML').addEventListener('click', () => exportarXML(archivosRenombrados));
 }
 
-// Manejar archivos seleccionados desde el input
-function manejarArchivosSeleccionados(event) {
-    const archivos = Array.from(event.target.files);
-    if (archivos.length > 0) {
-        procesarArchivosSubidos(archivos);
-    }
-    event.target.value = ''; // Reset input
-}
-
-// Procesar archivos subidos
-async function procesarArchivosSubidos(archivos) {
-    agregarLog(`Procesando ${archivos.length} archivo(s) ZIP...`, 'info');
+// ==================== MANEJO DE ARCHIVOS ====================
+function manejarSeleccionArchivos(event) {
+    const files = Array.from(event.target.files);
     
-    archivosOriginales = archivos;
-    archivosProcesados = [];
-    
-    for (const archivo of archivos) {
-        agregarLog(`Analizando: ${archivo.name}`, 'info');
-        const resultado = await extraerNumeroConsecutivo(archivo);
-        archivosProcesados.push(resultado);
-    }
-    
-    // Detectar duplicados
-    detectarDuplicados();
-    
-    // Actualizar interfaz
-    actualizarResumen();
-    actualizarTabla();
-    mostrarSecciones();
-    
-    agregarLog('Análisis completado', 'exito');
-}
-
-// Extraer NumeroConsecutivo del ZIP
-async function extraerNumeroConsecutivo(archivo) {
-    const resultado = {
-        archivoOriginal: archivo,
-        nombreOriginal: archivo.name,
-        numeroConsecutivo: null,
-        nuevoNombre: null,
-        estado: 'error',
-        mensaje: ''
-    };
-    
-    try {
-        if (typeof JSZip === 'undefined') {
-            throw new Error('JSZip no está disponible');
-        }
-        
-        const zip = await JSZip.loadAsync(archivo);
-        
-        // Buscar archivos XML (excluyendo Respuesta)
-        const archivosXML = Object.keys(zip.files).filter(
-            nombre => nombre.endsWith('.xml') && !nombre.includes('Respuesta')
-        );
-        
-        if (archivosXML.length === 0) {
-            resultado.mensaje = 'No se encontró XML en el archivo';
-            agregarLog(`⚠️ ${archivo.name}: No se encontró XML`, 'warning');
-            return resultado;
-        }
-        
-        // Leer el primer XML encontrado
-        for (const nombreXML of archivosXML) {
-            const contenidoXML = await zip.files[nombreXML].async('text');
-            
-            // Buscar NumeroConsecutivo usando regex (más robusto para namespaces)
-            const regex = /<(?:\w+:)?NumeroConsecutivo>([^<]+)<\/(?:\w+:)?NumeroConsecutivo>/;
-            const match = contenidoXML.match(regex);
-            
-            if (match && match[1]) {
-                resultado.numeroConsecutivo = match[1].trim();
-                resultado.nuevoNombre = `${resultado.numeroConsecutivo}.zip`;
-                resultado.estado = 'ok';
-                resultado.mensaje = 'Procesado correctamente';
-                agregarLog(`✓ ${archivo.name} → ${resultado.nuevoNombre}`, 'exito');
-                return resultado;
-            }
-        }
-        
-        resultado.mensaje = 'No se encontró NumeroConsecutivo en el XML';
-        agregarLog(`⚠️ ${archivo.name}: No se encontró NumeroConsecutivo`, 'warning');
-        
-    } catch (error) {
-        resultado.mensaje = `Error: ${error.message}`;
-        agregarLog(`❌ ${archivo.name}: ${error.message}`, 'error');
-    }
-    
-    return resultado;
-}
-
-// Detectar duplicados
-function detectarDuplicados() {
-    const conteoConsecutivos = {};
-    
-    // Contar ocurrencias de cada NumeroConsecutivo
-    archivosProcesados.forEach(archivo => {
-        if (archivo.numeroConsecutivo) {
-            if (!conteoConsecutivos[archivo.numeroConsecutivo]) {
-                conteoConsecutivos[archivo.numeroConsecutivo] = [];
-            }
-            conteoConsecutivos[archivo.numeroConsecutivo].push(archivo);
-        }
-    });
-    
-    // Marcar duplicados (conservar solo el primero)
-    Object.keys(conteoConsecutivos).forEach(consecutivo => {
-        const archivos = conteoConsecutivos[consecutivo];
-        if (archivos.length > 1) {
-            agregarLog(`⚠️ Duplicado detectado: ${consecutivo} (${archivos.length} archivos)`, 'warning');
-            // El primero se mantiene como 'ok', los demás como 'duplicado'
-            for (let i = 1; i < archivos.length; i++) {
-                archivos[i].estado = 'duplicado';
-                archivos[i].mensaje = `Duplicado de ${archivos[0].nombreOriginal}`;
-            }
-        }
-    });
-}
-
-// Actualizar resumen de estadísticas
-function actualizarResumen() {
-    const total = archivosProcesados.length;
-    const unicos = archivosProcesados.filter(a => a.estado === 'ok').length;
-    const duplicados = archivosProcesados.filter(a => a.estado === 'duplicado').length;
-    const errores = archivosProcesados.filter(a => a.estado === 'error').length;
-    
-    document.getElementById('totalArchivos').textContent = total;
-    document.getElementById('archivosUnicos').textContent = unicos;
-    document.getElementById('archivosDuplicados').textContent = duplicados;
-    document.getElementById('archivosError').textContent = errores;
-}
-
-// Actualizar tabla de archivos
-function actualizarTabla() {
-    const tbody = document.getElementById('tablaBody');
-    tbody.innerHTML = '';
-    
-    archivosProcesados.forEach(archivo => {
-        const tr = document.createElement('tr');
-        
-        let estadoClase = 'estado-error';
-        let estadoTexto = 'Error';
-        
-        if (archivo.estado === 'ok') {
-            estadoClase = 'estado-ok';
-            estadoTexto = 'OK';
-        } else if (archivo.estado === 'duplicado') {
-            estadoClase = 'estado-duplicado';
-            estadoTexto = 'Duplicado';
-        }
-        
-        tr.innerHTML = `
-            <td>${archivo.nombreOriginal}</td>
-            <td>${archivo.numeroConsecutivo || 'N/A'}</td>
-            <td>${archivo.nuevoNombre || 'N/A'}</td>
-            <td><span class="estado ${estadoClase}">${estadoTexto}</span></td>
-        `;
-        
-        tbody.appendChild(tr);
-    });
-}
-
-// Mostrar secciones ocultas
-function mostrarSecciones() {
-    document.getElementById('seccionResumen').style.display = 'block';
-    document.getElementById('seccionTabla').style.display = 'block';
-    document.getElementById('seccionAcciones').style.display = 'flex';
-    document.getElementById('seccionLog').style.display = 'block';
-}
-
-// Procesar y descargar archivos
-async function procesarYDescargar() {
-    const archivosADescargar = archivosProcesados.filter(a => a.estado === 'ok');
-    
-    if (archivosADescargar.length === 0) {
-        alert('No hay archivos válidos para descargar');
+    if (files.length === 0) {
         return;
     }
     
-    agregarLog(`Generando ZIP con ${archivosADescargar.length} archivo(s)...`, 'info');
+    archivosSeleccionados = files.map(file => ({
+        file: file,
+        nombreOriginal: file.name,
+        nombreNuevo: '',
+        extension: obtenerExtension(file.name),
+        fechaModificacion: new Date(file.lastModified),
+        tamanio: file.size,
+        procesado: false
+    }));
     
-    try {
-        const zipFinal = new JSZip();
-        
-        for (const archivo of archivosADescargar) {
-            const contenido = await archivo.archivoOriginal.arrayBuffer();
-            zipFinal.file(archivo.nuevoNombre, contenido);
-            agregarLog(`Añadido: ${archivo.nuevoNombre}`, 'info');
-        }
-        
-        const contenidoZip = await zipFinal.generateAsync({ 
-            type: 'blob',
-            compression: 'DEFLATE',
-            compressionOptions: { level: 6 }
-        });
-        
-        // Descargar usando método alternativo para evitar bloqueo de Windows
-        const url = URL.createObjectURL(contenidoZip);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `Comprobantes.zip`;
-        link.style.display = 'none';
-        document.body.appendChild(link);
-        link.click();
-        
-        // Limpiar después de un momento
-        setTimeout(() => {
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-        }, 100);
-        
-        agregarLog(`✓ ZIP descargado: ${link.download}`, 'exito');
-        agregarLog(`Archivos procesados: ${archivosADescargar.length}`, 'exito');
-        agregarLog(`Duplicados eliminados: ${archivosProcesados.filter(a => a.estado === 'duplicado').length}`, 'info');
-        
-    } catch (error) {
-        agregarLog(`❌ Error al generar ZIP: ${error.message}`, 'error');
-        alert('Error al generar el archivo ZIP');
+    actualizarContadorArchivos();
+    habilitarBotones();
+    
+    log(`📁 ${files.length} archivo(s) seleccionado(s)`, 'success');
+    log(`   Total: ${formatearTamanio(files.reduce((sum, f) => sum + f.size, 0))}`, 'info');
+}
+
+function actualizarContadorArchivos() {
+    const countText = document.getElementById('fileCountText');
+    const count = archivosSeleccionados.length;
+    
+    if (count === 0) {
+        countText.textContent = 'No hay archivos seleccionados';
+    } else {
+        const totalSize = archivosSeleccionados.reduce((sum, a) => sum + a.tamanio, 0);
+        countText.textContent = `${count} archivo(s) seleccionado(s) - ${formatearTamanio(totalSize)}`;
     }
 }
 
-// Exportar reporte JSON
-function exportarReporteJSON() {
-    const reporte = {
-        fecha: new Date().toISOString(),
-        version: CONFIG.id,
-        resumen: {
-            total: archivosProcesados.length,
-            unicos: archivosProcesados.filter(a => a.estado === 'ok').length,
-            duplicados: archivosProcesados.filter(a => a.estado === 'duplicado').length,
-            errores: archivosProcesados.filter(a => a.estado === 'error').length
-        },
-        archivos: archivosProcesados.map(a => ({
-            nombreOriginal: a.nombreOriginal,
-            numeroConsecutivo: a.numeroConsecutivo,
-            nuevoNombre: a.nuevoNombre,
-            estado: a.estado,
-            mensaje: a.mensaje
-        })),
-        log: logEntradas
-    };
+function habilitarBotones() {
+    const hayArchivos = archivosSeleccionados.length > 0;
+    document.getElementById('btnPreview').disabled = !hayArchivos;
+    document.getElementById('btnProcess').disabled = !hayArchivos;
+}
+
+// ==================== CONVERSIÓN DE NOMBRES ====================
+function convertirASlug(texto, fecha = null) {
+    // Convertir a minúsculas
+    let slug = texto.toLowerCase();
     
-    const blob = new Blob([JSON.stringify(reporte, null, 2)], { type: 'application/json' });
+    // Normalizar caracteres Unicode (eliminar acentos)
+    slug = slug.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    
+    // Reemplazar espacios y caracteres especiales con guiones
+    slug = slug.replace(/[^a-z0-9]+/g, '-');
+    
+    // Eliminar guiones al inicio y final
+    slug = slug.replace(/^-+|-+$/g, '');
+    
+    // Reemplazar guiones múltiples con uno solo
+    slug = slug.replace(/-+/g, '-');
+    
+    // Agregar fecha si se solicita
+    if (fecha && document.getElementById('includeDate').checked) {
+        const fechaStr = formatearFecha(fecha);
+        slug = `${fechaStr}-${slug}`;
+    }
+    
+    return slug;
+}
+
+function formatearFecha(fecha) {
+    const año = fecha.getFullYear();
+    const mes = String(fecha.getMonth() + 1).padStart(2, '0');
+    const dia = String(fecha.getDate()).padStart(2, '0');
+    return `${año}-${mes}-${dia}`;
+}
+
+function obtenerExtension(nombreArchivo) {
+    const partes = nombreArchivo.split('.');
+    if (partes.length > 1) {
+        return partes.pop().toLowerCase();
+    }
+    return 'sin_extension';
+}
+
+function obtenerNombreSinExtension(nombreArchivo) {
+    const partes = nombreArchivo.split('.');
+    if (partes.length > 1) {
+        partes.pop();
+    }
+    return partes.join('.');
+}
+
+// ==================== VISTA PREVIA ====================
+function mostrarVistaPrevia() {
+    log('👁️ Generando vista previa...', 'header');
+    
+    const previewSection = document.getElementById('previewSection');
+    const previewContainer = document.getElementById('previewContainer');
+    previewContainer.innerHTML = '';
+    
+    // Generar nombres nuevos
+    archivosSeleccionados.forEach(archivo => {
+        const nombreSinExt = obtenerNombreSinExtension(archivo.nombreOriginal);
+        const slug = convertirASlug(nombreSinExt, archivo.fechaModificacion);
+        archivo.nombreNuevo = `${slug}.${archivo.extension}`;
+    });
+    
+    // Verificar cambios
+    const archivosConCambios = archivosSeleccionados.filter(a => a.nombreOriginal !== a.nombreNuevo);
+    
+    if (archivosConCambios.length === 0) {
+        previewContainer.innerHTML = '<p style="text-align: center; padding: 20px; color: #6c757d;">✅ No hay cambios que realizar. Los nombres ya están en formato correcto.</p>';
+        previewSection.style.display = 'block';
+        log('✅ No hay cambios necesarios', 'success');
+        return;
+    }
+    
+    // Mostrar preview
+    archivosConCambios.forEach((archivo, index) => {
+        const item = document.createElement('div');
+        item.className = 'preview-item';
+        item.innerHTML = `
+            <div class="original">❌ ${archivo.nombreOriginal}</div>
+            <div class="arrow">   ↓</div>
+            <div class="new">✅ ${archivo.nombreNuevo}</div>
+        `;
+        previewContainer.appendChild(item);
+    });
+    
+    previewSection.style.display = 'block';
+    
+    log(`✅ Vista previa generada: ${archivosConCambios.length} archivo(s) con cambios`, 'success');
+    
+    // Scroll suave a la sección de preview
+    previewSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ==================== PROCESAMIENTO ====================
+async function procesarArchivos() {
+    if (estaProcesando) {
+        return;
+    }
+    
+    if (archivosSeleccionados.length === 0) {
+        alert('⚠️ No hay archivos seleccionados');
+        return;
+    }
+    
+    // Confirmar acción
+    if (!confirm(`¿Desea procesar ${archivosSeleccionados.length} archivo(s)?`)) {
+        return;
+    }
+    
+    estaProcesando = true;
+    document.body.classList.add('processing');
+    
+    log('▶️ Iniciando procesamiento...', 'header');
+    mostrarProgreso(true);
+    
+    // Generar nombres nuevos
+    archivosSeleccionados.forEach(archivo => {
+        const nombreSinExt = obtenerNombreSinExtension(archivo.nombreOriginal);
+        const slug = convertirASlug(nombreSinExt, archivo.fechaModificacion);
+        archivo.nombreNuevo = `${slug}.${archivo.extension}`;
+    });
+    
+    const total = archivosSeleccionados.length;
+    archivosRenombrados = [];
+    
+    for (let i = 0; i < archivosSeleccionados.length; i++) {
+        const archivo = archivosSeleccionados[i];
+        
+        try {
+            // Crear nuevo File con nombre modificado
+            const nuevoFile = new File([archivo.file], archivo.nombreNuevo, {
+                type: archivo.file.type,
+                lastModified: archivo.file.lastModified
+            });
+            
+            archivo.fileNuevo = nuevoFile;
+            archivo.procesado = true;
+            archivosRenombrados.push(archivo);
+            
+            actualizarProgreso((i + 1) / total * 100, `Procesado: ${i + 1}/${total} archivos`);
+            
+            if (archivo.nombreOriginal !== archivo.nombreNuevo) {
+                log(`  ✓ ${archivo.nombreOriginal} → ${archivo.nombreNuevo}`, 'success');
+            }
+            
+        } catch (error) {
+            log(`  ⚠️ Error procesando ${archivo.nombreOriginal}: ${error.message}`, 'error');
+        }
+    }
+    
+    log(`✅ Procesamiento completado: ${archivosRenombrados.length}/${total} archivos`, 'success');
+    
+    // Habilitar botón de descarga
+    document.getElementById('btnDownloadAll').disabled = false;
+    
+    estaProcesando = false;
+    document.body.classList.remove('processing');
+    
+    // Organizar por extensión si está habilitado
+    if (document.getElementById('organizeByExtension').checked) {
+        mostrarOrganizacionPorExtension();
+    }
+}
+
+function mostrarOrganizacionPorExtension() {
+    const porExtension = {};
+    
+    archivosRenombrados.forEach(archivo => {
+        if (!porExtension[archivo.extension]) {
+            porExtension[archivo.extension] = [];
+        }
+        porExtension[archivo.extension].push(archivo);
+    });
+    
+    log('', 'normal');
+    log('📂 Organización por extensión:', 'header');
+    
+    Object.keys(porExtension).sort().forEach(ext => {
+        const archivos = porExtension[ext];
+        log(`   📁 ${ext}/ - ${archivos.length} archivo(s)`, 'info');
+    });
+}
+
+// ==================== DESCARGA ====================
+async function descargarTodos() {
+    if (archivosRenombrados.length === 0) {
+        alert('⚠️ No hay archivos procesados para descargar');
+        return;
+    }
+    
+    log('💾 Descargando archivos...', 'header');
+    
+    const organizarPorExt = document.getElementById('organizeByExtension').checked;
+    
+    if (organizarPorExt) {
+        await descargarOrganizadoPorExtension();
+    } else {
+        await descargarTodosSueltos();
+    }
+    
+    log('✅ Descarga completada', 'success');
+}
+
+async function descargarTodosSueltos() {
+    for (let i = 0; i < archivosRenombrados.length; i++) {
+        const archivo = archivosRenombrados[i];
+        descargarArchivo(archivo.fileNuevo || archivo.file, archivo.nombreNuevo);
+        
+        // Pequeña pausa para no saturar el navegador
+        if (i < archivosRenombrados.length - 1) {
+            await esperar(100);
+        }
+    }
+}
+
+async function descargarOrganizadoPorExtension() {
+    // Verificar si JSZip está disponible
+    if (typeof JSZip === 'undefined') {
+        alert('⚠️ La función de organizar por carpetas requiere descargas individuales.\nSe descargarán los archivos uno por uno.');
+        await descargarTodosSueltos();
+        return;
+    }
+    
+    const zip = new JSZip();
+    const porExtension = {};
+    
+    // Agrupar por extensión
+    archivosRenombrados.forEach(archivo => {
+        if (!porExtension[archivo.extension]) {
+            porExtension[archivo.extension] = [];
+        }
+        porExtension[archivo.extension].push(archivo);
+    });
+    
+    // Agregar archivos al ZIP organizados por carpetas
+    for (const ext in porExtension) {
+        const folder = zip.folder(ext);
+        for (const archivo of porExtension[ext]) {
+            folder.file(archivo.nombreNuevo, archivo.fileNuevo || archivo.file);
+        }
+    }
+    
+    log('📦 Generando archivo ZIP...', 'info');
+    
+    // Generar y descargar ZIP
+    const contenido = await zip.generateAsync({ type: 'blob' });
+    const fecha = obtenerFechaHora();
+    descargarArchivo(contenido, `archivos_organizados_${fecha}.zip`);
+    
+    log('✅ ZIP generado y descargado', 'success');
+}
+
+function descargarArchivo(blob, nombreArchivo) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `Comprobantes.json`;
+    link.download = nombreArchivo;
+    link.click();
+    URL.revokeObjectURL(url);
+}
+
+function esperar(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ==================== PROGRESO ====================
+function mostrarProgreso(mostrar) {
+    document.getElementById('progressSection').style.display = mostrar ? 'block' : 'none';
+    if (!mostrar) {
+        actualizarProgreso(0, 'Listo para procesar');
+    }
+}
+
+function actualizarProgreso(porcentaje, mensaje) {
+    const fill = document.getElementById('progressBarFill');
+    const text = document.getElementById('progressText');
+    
+    fill.style.width = `${porcentaje}%`;
+    text.textContent = mensaje;
+}
+
+// ==================== LOG ====================
+function log(mensaje, tipo = 'normal') {
+    const logArea = document.getElementById('logArea');
+    const entry = document.createElement('div');
+    entry.className = `log-entry log-${tipo}`;
+    entry.textContent = mensaje;
+    logArea.appendChild(entry);
+    logArea.scrollTop = logArea.scrollHeight;
+}
+
+function limpiarLog() {
+    document.getElementById('logArea').innerHTML = '';
+    log('🗑️ Log limpiado', 'info');
+}
+
+// ==================== EXPORTACIÓN ====================
+function exportarJSON(datos, nombreArchivo = null) {
+    if (!datos || datos.length === 0) {
+        alert('No hay datos para exportar');
+        return;
+    }
+    
+    const datosExportar = datos.map(a => ({
+        nombreOriginal: a.nombreOriginal,
+        nombreNuevo: a.nombreNuevo,
+        extension: a.extension,
+        fechaModificacion: a.fechaModificacion.toISOString(),
+        tamanio: a.tamanio,
+        procesado: a.procesado
+    }));
+    
+    const json = JSON.stringify(datosExportar, null, 2);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = nombreArchivo || `archivos_${obtenerFechaHora()}.json`;
     link.click();
     URL.revokeObjectURL(url);
     
-    agregarLog('Reporte JSON exportado', 'exito');
+    log('📄 Datos exportados a JSON', 'success');
 }
 
-// Exportar reporte CSV
-function exportarReporteCSV() {
-    let csv = 'Archivo Original,NumeroConsecutivo,Nuevo Nombre,Estado,Mensaje\n';
+function exportarCSV(datos, nombreArchivo = null) {
+    if (!datos || datos.length === 0) {
+        alert('No hay datos para exportar');
+        return;
+    }
     
-    archivosProcesados.forEach(archivo => {
-        csv += `"${archivo.nombreOriginal}","${archivo.numeroConsecutivo || ''}","${archivo.nuevoNombre || ''}","${archivo.estado}","${archivo.mensaje}"\n`;
+    // Encabezados
+    let csv = 'Nombre Original,Nombre Nuevo,Extensión,Fecha Modificación,Tamaño (bytes),Procesado\n';
+    
+    // Datos
+    datos.forEach(a => {
+        csv += `"${a.nombreOriginal}","${a.nombreNuevo}","${a.extension}","${a.fechaModificacion.toISOString()}",${a.tamanio},${a.procesado}\n`;
     });
     
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `Comprobantes.csv`;
+    link.download = nombreArchivo || `archivos_${obtenerFechaHora()}.csv`;
     link.click();
     URL.revokeObjectURL(url);
     
-    agregarLog('Reporte CSV exportado', 'exito');
+    log('📊 Datos exportados a CSV', 'success');
 }
 
-// Limpiar todo
-function limpiarTodo() {
-    if (!confirm('¿Está seguro de limpiar todos los archivos cargados?')) {
+function exportarHTML(datos, nombreArchivo = null) {
+    if (!datos || datos.length === 0) {
+        alert('No hay datos para exportar');
         return;
     }
     
-    archivosOriginales = [];
-    archivosProcesados = [];
-    logEntradas = [];
+    let html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reporte de Archivos Organizados</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        h1 {
+            color: #007bff;
+            border-bottom: 3px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .info {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #dee2e6;
+        }
+        th {
+            background-color: #007bff;
+            color: white;
+            font-weight: 600;
+        }
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+        .procesado {
+            color: #28a745;
+            font-weight: bold;
+        }
+        .no-procesado {
+            color: #dc3545;
+        }
+        .extension-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            background-color: #17a2b8;
+            color: white;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>📁 Reporte de Archivos Organizados</h1>
+    <div class="info">
+        <p><strong>Fecha del reporte:</strong> ${new Date().toLocaleString('es-ES')}</p>
+        <p><strong>Total de archivos:</strong> ${datos.length}</p>
+        <p><strong>Archivos procesados:</strong> ${datos.filter(a => a.procesado).length}</p>
+        <p><strong>Generado por:</strong> ${CONFIG.autor}</p>
+        <p><strong>ID de aplicación:</strong> ${CONFIG.id}</p>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Nombre Original</th>
+                <th>Nombre Nuevo</th>
+                <th>Ext.</th>
+                <th>Tamaño</th>
+                <th>Estado</th>
+            </tr>
+        </thead>
+        <tbody>`;
     
-    document.getElementById('tablaBody').innerHTML = '';
-    document.getElementById('logContenedor').innerHTML = '';
-    document.getElementById('seccionResumen').style.display = 'none';
-    document.getElementById('seccionTabla').style.display = 'none';
-    document.getElementById('seccionAcciones').style.display = 'none';
-    document.getElementById('seccionLog').style.display = 'none';
+    datos.forEach((a, index) => {
+        html += `
+            <tr>
+                <td>${index + 1}</td>
+                <td>${a.nombreOriginal}</td>
+                <td>${a.nombreNuevo}</td>
+                <td><span class="extension-badge">${a.extension}</span></td>
+                <td>${formatearTamanio(a.tamanio)}</td>
+                <td class="${a.procesado ? 'procesado' : 'no-procesado'}">${a.procesado ? '✓ Procesado' : '✗ Pendiente'}</td>
+            </tr>`;
+    });
     
-    agregarLog('Aplicación reiniciada', 'info');
-    document.getElementById('seccionLog').style.display = 'block';
+    html += `
+        </tbody>
+    </table>
+</body>
+</html>`;
+    
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = nombreArchivo || `reporte_archivos_${obtenerFechaHora()}.html`;
+    link.click();
+    URL.revokeObjectURL(url);
+    
+    log('🌐 Reporte exportado a HTML', 'success');
 }
 
-// Agregar entrada al log
-function agregarLog(mensaje, tipo = 'info') {
+function escaparXML(str) {
+    if (str === null || str === undefined) return '';
+    return String(str).replace(/[<>&"']/g, function(match) {
+        switch (match) {
+            case '<': return '&lt;';
+            case '>': return '&gt;';
+            case '&': return '&amp;';
+            case '"': return '&quot;';
+            case "'": return '&apos;';
+            default: return match;
+        }
+    });
+}
+
+function exportarXML(datos, nombreArchivo = null) {
+    if (!datos || datos.length === 0) {
+        alert('No hay datos para exportar');
+        return;
+    }
+    
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<archivos>\n';
+    
+    datos.forEach(a => {
+        xml += '  <archivo>\n';
+        xml += `    <nombreOriginal>${escaparXML(a.nombreOriginal)}</nombreOriginal>\n`;
+        xml += `    <nombreNuevo>${escaparXML(a.nombreNuevo)}</nombreNuevo>\n`;
+        xml += `    <extension>${escaparXML(a.extension)}</extension>\n`;
+        xml += `    <fechaModificacion>${escaparXML(a.fechaModificacion.toISOString())}</fechaModificacion>\n`;
+        xml += `    <tamanio>${a.tamanio}</tamanio>\n`;
+        xml += `    <procesado>${a.procesado}</procesado>\n`;
+        xml += '  </archivo>\n';
+    });
+    
+    xml += '</archivos>';
+    
+    const blob = new Blob([xml], { type: 'application/xml;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = nombreArchivo || `archivos_${obtenerFechaHora()}.xml`;
+    link.click();
+    URL.revokeObjectURL(url);
+    
+    log('📋 Datos exportados a XML', 'success');
+}
+
+// ==================== UTILIDADES ====================
+function obtenerFechaHora() {
     const ahora = new Date();
-    const tiempo = ahora.toLocaleTimeString('es-CR');
-    
-    const entrada = {
-        tiempo: tiempo,
-        mensaje: mensaje,
-        tipo: tipo
-    };
-    
-    logEntradas.push(entrada);
-    
-    const logContenedor = document.getElementById('logContenedor');
-    const entradaHTML = document.createElement('div');
-    entradaHTML.className = 'log-entrada';
-    entradaHTML.innerHTML = `<span class="log-tiempo">[${tiempo}]</span> <span class="log-${tipo}">${mensaje}</span>`;
-    logContenedor.appendChild(entradaHTML);
-    
-    // Auto-scroll al final
-    logContenedor.scrollTop = logContenedor.scrollHeight;
+    const año = ahora.getFullYear();
+    const mes = String(ahora.getMonth() + 1).padStart(2, '0');
+    const dia = String(ahora.getDate()).padStart(2, '0');
+    const horas = String(ahora.getHours()).padStart(2, '0');
+    const minutos = String(ahora.getMinutes()).padStart(2, '0');
+    return `${año}${mes}${dia}_${horas}${minutos}`;
 }
 
+function formatearTamanio(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+}
